@@ -1,5 +1,10 @@
 pipeline {
-  agent any
+  agent {
+    docker {
+      image 'docker:latest'
+      args '-v /var/run/docker.sock:/var/run/docker.sock -u root'
+    }
+  }
   
   environment {
     DOCKER_IMAGE = 'notgub/my-portfolio-nextjs'
@@ -29,8 +34,8 @@ pipeline {
     stage('Build Docker Image') {
       steps {
         script {
-          // Build the Docker image
-          docker.build("${DOCKER_IMAGE}:${DOCKER_TAG}")
+          // Build the Docker image using shell commands to avoid permission issues
+          sh "docker build -t ${DOCKER_IMAGE}:${DOCKER_TAG} ."
           
           // Also tag as latest
           sh "docker tag ${DOCKER_IMAGE}:${DOCKER_TAG} ${DOCKER_IMAGE}:${DOCKER_TAG_LATEST}"
