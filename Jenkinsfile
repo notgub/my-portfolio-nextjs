@@ -34,14 +34,14 @@ pipeline {
     stage('Build Docker Image') {
       steps {
         script {
-          // Build the Docker image using shell commands to avoid permission issues
-          sh "docker build -t ${DOCKER_IMAGE}:${DOCKER_TAG} ."
+          // Build the Docker image using Docker Pipeline plugin
+          def dockerImage = docker.build("${DOCKER_IMAGE}:${DOCKER_TAG}")
           
           // Also tag as latest
-          sh "docker tag ${DOCKER_IMAGE}:${DOCKER_TAG} ${DOCKER_IMAGE}:${DOCKER_TAG_LATEST}"
+          dockerImage.tag("${DOCKER_TAG_LATEST}")
           
           // Tag with commit hash
-          sh "docker tag ${DOCKER_IMAGE}:${DOCKER_TAG} ${DOCKER_IMAGE}:${DOCKER_TAG_COMMIT}"
+          dockerImage.tag("${DOCKER_TAG_COMMIT}")
         }
       }
     }
@@ -57,13 +57,12 @@ pipeline {
           )]) {
             sh "echo ${DOCKER_PASSWORD} | docker login -u ${DOCKER_USERNAME} --password-stdin"
             
-            // Push all tags
-            sh "docker push ${DOCKER_IMAGE}:${DOCKER_TAG}"
-            sh "docker push ${DOCKER_IMAGE}:${DOCKER_TAG_LATEST}"
-            sh "docker push ${DOCKER_IMAGE}:${DOCKER_TAG_COMMIT}"
-            
-            // Logout from Docker Hub
-            sh "docker logout"
+            // Push all tags using Docker Pipeline plugin
+            docker.withRegistry('https://registry.hub.docker.com', 'docker-hub-credentials') {
+              docker.image("${DOCKER_IMAGE}:${DOCKER_TAG}").push()
+              docker.image("${DOCKER_IMAGE}:${DOCKER_TAG_LATEST}").push()
+              docker.image("${DOCKER_IMAGE}:${DOCKER_TAG_COMMIT}").push()
+            }
           }
         }
       }
@@ -74,9 +73,13 @@ pipeline {
     always {
       // Clean up Docker images to save space
       script {
-        sh "docker rmi ${DOCKER_IMAGE}:${DOCKER_TAG} || true"
-        sh "docker rmi ${DOCKER_IMAGE}:${DOCKER_TAG_LATEST} || true"
-        sh "docker rmi ${DOCKER_IMAGE}:${DOCKER_TAG_COMMIT} || true"
+        try {
+          docker.image("${DOCKER_IMAGE}:${DOCKER_TAG}").remove()
+          docker.image("${DOCKER_IMAGE}:${DOCKER_TAG_LATEST}").remove()
+          docker.image("${DOCKER_IMAGE}:${DOCKER_TAG_COMMIT}").remove()
+        } catch (Exception e) {
+          echo "Failed to remove some Docker images: ${e.getMessage()}"
+        }
       }
     }
     
