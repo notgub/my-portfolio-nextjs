@@ -18,10 +18,13 @@ pipeline {
     stage('Checkout') {
       steps {
 	      checkout scm
-        env.commitHash = sh(
-            script: "git rev-parse --short HEAD",
-            returnStdout: true
-          ).trim()
+
+        script {
+          env.commitHash = sh(
+              script: "git rev-parse --short HEAD",
+              returnStdout: true
+            ).trim()
+        }
       }
     }
 
