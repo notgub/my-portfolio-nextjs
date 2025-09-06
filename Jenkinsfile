@@ -1,92 +1,69 @@
 pipeline {
   agent any
-  
+
   environment {
-    DOCKER_IMAGE = 'notgub/my-portfolio-nextjs'
-    DOCKER_TAG = "${env.BUILD_NUMBER}"
+    DOCKER_HUB_REPO = "notgub/my-portfolio-nextjs"
+    DOCKER_HUB_CREDENTIALS = "docker-hub-credential"
+    DOCKER_HUB_TAG = "latest"
+    // commitHash will be set dynamically
   }
-  
+
   stages {
-    stage('Checkout') {
+    stage('Pre processing') {
       steps {
-        // Checkout code from SCM (Git)
-        checkout scm
-        
-        script {
-          // Get the current git commit hash for tagging
-          env.GIT_COMMIT_HASH = sh(
-            script: 'git rev-parse --short HEAD',
-            returnStdout: true
-          ).trim()
-          
-          // Set additional tags
-          env.DOCKER_TAG_LATEST = 'latest'
-          env.DOCKER_TAG_COMMIT = "${env.GIT_COMMIT_HASH}"
-        }
+        deleteDir()
       }
     }
-    
+
+    stage('Checkout') {
+      steps {
+	      checkout scm
+        env.commitHash = sh(
+            script: "git rev-parse --short HEAD",
+            returnStdout: true
+          ).trim()
+      }
+    }
+
     stage('Build Docker Image') {
       steps {
         script {
-          // Build the Docker image using Docker Pipeline plugin
-          def dockerImage = docker.build("${DOCKER_IMAGE}:${DOCKER_TAG}")
-          
-          // Also tag as latest
-          dockerImage.tag("${DOCKER_TAG_LATEST}")
-          
-          // Tag with commit hash
-          dockerImage.tag("${DOCKER_TAG_COMMIT}")
+          def dockerImage = docker.build("${DOCKER_HUB_REPO}:${DOCKER_HUB_TAG}")
+          dockerImage.tag("${env.commitHash}")
         }
       }
     }
-    
-    stage('Push to Docker Hub') {
+
+    stage('Push Docker Image') {
       steps {
         script {
-          // Login to Docker Hub (credentials should be configured in Jenkins)
-          withCredentials([usernamePassword(
-            credentialsId: 'docker-hub-credentials',
-            usernameVariable: 'DOCKER_USERNAME',
-            passwordVariable: 'DOCKER_PASSWORD'
-          )]) {
-            sh "echo ${DOCKER_PASSWORD} | docker login -u ${DOCKER_USERNAME} --password-stdin"
-            
-            // Push all tags using Docker Pipeline plugin
-            docker.withRegistry('https://registry.hub.docker.com', 'docker-hub-credentials') {
-              docker.image("${DOCKER_IMAGE}:${DOCKER_TAG}").push()
-              docker.image("${DOCKER_IMAGE}:${DOCKER_TAG_LATEST}").push()
-              docker.image("${DOCKER_IMAGE}:${DOCKER_TAG_COMMIT}").push()
-            }
+          docker.withRegistry('https://index.docker.io/v1/', "${DOCKER_HUB_CREDENTIALS}") {
+            def dockerImage = docker.image("${DOCKER_HUB_REPO}:${DOCKER_HUB_TAG}")
+            dockerImage.push()
+            dockerImage.push("${env.commitHash}")
           }
         }
       }
     }
-  }
-  
-  post {
-    always {
-      // Clean up Docker images to save space
-      script {
-        try {
-          docker.image("${DOCKER_IMAGE}:${DOCKER_TAG}").remove()
-          docker.image("${DOCKER_IMAGE}:${DOCKER_TAG_LATEST}").remove()
-          docker.image("${DOCKER_IMAGE}:${DOCKER_TAG_COMMIT}").remove()
-        } catch (Exception e) {
-          echo "Failed to remove some Docker images: ${e.getMessage()}"
+
+    stage('Deploy Docker Container') {
+      steps {
+        script {
+          // Stop and remove any existing container with the same name
+          sh '''
+            docker rm -f my-portfolio-nextjs || true
+          '''
+
+          // Run new container from pushed image
+          sh '''
+            docker run -d --name my-portfolio-nextjs -p 3000:3000 ${DOCKER_HUB_REPO}:${DOCKER_HUB_TAG}
+          '''
+          // Optionally, to deploy from the commit hash tag:
+          // sh '''
+          //   docker run -d --name my-portfolio-nextjs -p 3000:3000 ${DOCKER_HUB_REPO}:${commitHash}
+          // '''
         }
       }
-    }
-    
-    success {
-      echo "Pipeline completed successfully!"
-      echo "Docker image pushed: ${DOCKER_IMAGE}:${DOCKER_TAG}"
-      echo "Docker image pushed: ${DOCKER_IMAGE}:${DOCKER_TAG_LATEST}"
-      echo "Docker image pushed: ${DOCKER_IMAGE}:${DOCKER_TAG_COMMIT}"
-    }
-    
-    failure {
-      echo "Pipeline failed!"
     }
   }
 }
